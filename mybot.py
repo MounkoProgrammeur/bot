@@ -162,6 +162,11 @@ async def webhook(request: Request):
 async def health():
     return {"status": "running"}
 
+# Route racine pour éviter "Non trouvé"
+@app.get("/")
+async def root():
+    return {"message": "Bot Telegram en ligne"}
+
 # Initialisation et configuration du webhook au démarrage
 @app.on_event("startup")
 async def on_startup():
