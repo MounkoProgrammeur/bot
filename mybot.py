@@ -186,7 +186,7 @@ async def health():
 # Configure le webhook au démarrage
 @app.on_event("startup")
 async def on_startup():
-    webhook_url = os.environ.get("WEBHOOK_URL", "https://your-bot.onrender.com/webhook")
+    webhook_url = os.environ.get("WEBHOOK_URL", "https://bot-1xw3.onrender.com/webhook")
     await application.bot.set_webhook(url=webhook_url)
     logger.info(f"Webhook configuré sur {webhook_url}")
 
