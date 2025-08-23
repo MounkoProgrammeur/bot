@@ -1,10 +1,8 @@
-import logging
 from fastapi import FastAPI, Request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
-import asyncio
 import os
-from dotenv import load_dotenv
+import logging
 from groq import Groq
 
 # Configuration des logs
@@ -15,11 +13,10 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # Clés API
-load_dotenv()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-# Vérifier que les clés sont bien chargées
+# Vérifier les clés
 if not TELEGRAM_TOKEN or not GROQ_API_KEY:
     raise ValueError("TELEGRAM_TOKEN ou GROQ_API_KEY non défini !")
 
@@ -31,12 +28,6 @@ user_languages = {}
 
 # Initialisation de l'application Telegram
 application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-# Fonction pour envoyer “typing” en continu
-async def send_typing_continuous(context, chat_id):
-    while True:
-        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-        await asyncio.sleep(2)
 
 # Commande /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -108,10 +99,11 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("🧹 History cleared. The conversation starts over.")
 
-# Fonction principale pour gérer les messages
+# Fonction pour gérer les messages
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     user_message = update.message.text
+    logger.info(f"Message reçu de {user_id}: {user_message}")
 
     if not user_message:
         await update.message.reply_text("⚠️ Message vide.")
@@ -138,59 +130,47 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_histories[user_id].append({"role": "user", "content": user_message})
 
     try:
-        chat_id = update.effective_chat.id
-        typing_task = asyncio.create_task(send_typing_continuous(context, chat_id))
-
         response = client.chat.completions.create(
             model="llama3-8b-8192",
             messages=user_histories[user_id]
         )
-
         bot_reply = response.choices[0].message.content
         user_histories[user_id].append({"role": "assistant", "content": bot_reply})
-
-        typing_task.cancel()
-        await asyncio.sleep(0.05)
-
-        sent_message = await update.message.reply_text("...")
-        text_to_send = ""
-        words = bot_reply.split()
-        i = 0
-        while i < len(words):
-            block = " ".join(words[i:i+3])
-            text_to_send += block + " "
-            await sent_message.edit_text(text_to_send)
-            await asyncio.sleep(0.02)
-            i += 3
-
+        await update.message.reply_text(bot_reply)
+        logger.info(f"Réponse envoyée : {bot_reply}")
     except Exception as e:
         await update.message.reply_text("⚠️ Une erreur est survenue.")
-        logger.error(f"Erreur : {e}")
+        logger.error(f"Erreur dans handle_message : {e}", exc_info=True)
 
-# Endpoint webhook pour Telegram
+# Endpoint webhook
 @app.post("/webhook")
 async def webhook(request: Request):
     try:
-        update = Update.de_json(await request.json(), application.bot)
+        data = await request.json()
+        logger.info(f"Requête webhook reçue : {data}")
+        update = Update.de_json(data, application.bot)
+        logger.info(f"Update traité : {update}")
         await application.process_update(update)
+        logger.info("Mise à jour traitée avec succès")
         return {"status": "ok"}
     except Exception as e:
-        logger.error(f"Erreur dans le webhook : {e}")
+        logger.error(f"Erreur dans le webhook : {e}", exc_info=True)
         return {"status": "error"}
 
-# Route santé pour vérifier que le bot est en ligne
+# Route santé
 @app.get("/health")
 async def health():
     return {"status": "running"}
 
-# Configure le webhook au démarrage
+# Initialisation et configuration du webhook au démarrage
 @app.on_event("startup")
 async def on_startup():
+    await application.initialize()  # Initialisation explicite
     webhook_url = os.environ.get("WEBHOOK_URL", "https://bot-1xw3.onrender.com/webhook")
     await application.bot.set_webhook(url=webhook_url)
     logger.info(f"Webhook configuré sur {webhook_url}")
 
-# Ajout des handlers au démarrage
+# Ajout des handlers
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("help", help_command))
 application.add_handler(CommandHandler("clear", clear))
@@ -199,5 +179,4 @@ application.add_handler(CallbackQueryHandler(set_language))
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
