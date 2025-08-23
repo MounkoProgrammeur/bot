@@ -4,6 +4,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import os
 import logging
 from groq import Groq
+import asyncio
 
 # Configuration des logs
 logging.basicConfig(level=logging.INFO)
@@ -130,13 +131,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_histories[user_id].append({"role": "user", "content": user_message})
 
     try:
+        # Envoi de l'action "typing" pendant le traitement
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        
+        # Appel à l'API Groq
         response = client.chat.completions.create(
             model="llama3-8b-8192",
             messages=user_histories[user_id]
         )
         bot_reply = response.choices[0].message.content
         user_histories[user_id].append({"role": "assistant", "content": bot_reply})
-        await update.message.reply_text(bot_reply)
+
+        # Envoi progressif du message (par blocs de 3 mots)
+        sent_message = await update.message.reply_text("...")
+        text_to_send = ""
+        words = bot_reply.split()
+        i = 0
+        while i < len(words):
+            block = " ".join(words[i:i+3])
+            text_to_send += block + " "
+            await sent_message.edit_text(text_to_send)
+            await asyncio.sleep(0.02)  # Pause rapide pour effet visuel
+            i += 3
+        
         logger.info(f"Réponse envoyée : {bot_reply}")
     except Exception as e:
         await update.message.reply_text("⚠️ Une erreur est survenue.")
